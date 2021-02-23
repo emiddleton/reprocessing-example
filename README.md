@@ -1,6 +1,6 @@
 ## Sandworm
 
-I wrote this to lear how to use ReasomML and Reprocessing.
+I wrote this to learn how to use ReasomML and Reprocessing.
 
 ## How to
 
