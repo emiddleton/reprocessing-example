@@ -1,291 +1,295 @@
 open Reprocessing;
 
-let jumpForce = (-350.);
-
-let speed = 175.;
-
-let pipeWidth = 50.;
-
-let halfGap = 70.;
-
-let birdSize = 20.;
-
-let gravity = 800.;
-
-let birdX = 50.;
-
-let defaultBirdY = 50.;
-
-let pipeHeight = 350.;
-
-let floorY = 500.;
-
-type runningT =
-  | Running
-  | Dead
-  | Restart;
-
-type stateT = {
-  birdY: float,
-  birdVY: float,
-  pipes: list((float, float)),
-  xOffset: float,
-  running: runningT,
-  image: imageT,
-  font: fontT,
-  score: int
-};
-
-let setup = env => {
-  Env.size(~width=400, ~height=640, env);
-  {
-    birdY: defaultBirdY,
-    birdVY: 0.,
-    pipes: [(200., 100.), (400., 100.), (600., 100.), (800., 100.)],
-    xOffset: 0.,
-    running: Running,
-    image: Draw.loadImage(~filename="assets/flappy.png", ~isPixel=true, env),
-    font: Draw.loadFont(~filename="assets/flappy.fnt", ~isPixel=true, env),
-    score: 0
-  };
-};
-
-let generatePipe = x => (
-  x +. Utils.randomf(~min=200., ~max=300.),
-  Utils.randomf(~min=50. +. halfGap, ~max=floorY -. 50. -. halfGap)
+let createVelocity = (max: float): (float, float) => (
+  Random.float(max),
+  Random.float(max),
 );
 
-let generateNewPipes = ({pipes, xOffset}) =>
-  List.map(
-    ((x, _) as pipe) =>
-      if (x -. xOffset +. pipeWidth <= 0.) {
-        let newX = List.fold_left((maxX, (x, _)) => max(maxX, x), 0., pipes);
-        generatePipe(newX);
-      } else {
-        pipe;
-      },
-    pipes
-  );
+let createPosition =
+    ((width, height) as _display: (float, float)): (float, float) => (
+  Random.float(width),
+  Random.float(height),
+);
 
-let drawBird = (state, env) => {
-  Draw.pushMatrix(env);
-  Draw.translate(~x=birdX, ~y=state.birdY -. 2., env);
-  let low1 = (-200.);
-  Draw.rotate(
-    Utils.remapf(
-      ~value=state.birdVY,
-      ~low1,
-      ~high1=800.,
-      ~low2=-1.,
-      ~high2=1.
-    ),
-    env
-  );
-  Draw.translate(~x=birdSize *. (-1.), ~y=birdSize *. (-1.), env);
-  switch (int_of_float(state.xOffset /. 20.) mod 3) {
-  | 0 =>
-    Draw.subImage(
-      state.image,
-      ~pos=(0, 0),
-      ~width=int_of_float(birdSize) * 2 + 4,
-      ~height=int_of_float(birdSize) * 2 + 4,
-      ~texPos=(115, 378),
-      ~texWidth=17,
-      ~texHeight=17,
-      env
-    )
-  | 1 =>
-    Draw.subImage(
-      state.image,
-      ~pos=(0, 0),
-      ~width=int_of_float(birdSize) * 2 + 4,
-      ~height=int_of_float(birdSize) * 2 + 4,
-      ~texPos=(115, 404),
-      ~texWidth=17,
-      ~texHeight=17,
-      env
-    )
-  | 2 =>
-    Draw.subImage(
-      state.image,
-      ~pos=(0, 0),
-      ~width=int_of_float(birdSize) * 2 + 4,
-      ~height=int_of_float(birdSize) * 2 + 4,
-      ~texPos=(115, 430),
-      ~texWidth=17,
-      ~texHeight=17,
-      env
-    )
-  | _ => assert false
+let display = (640., 480.);
+
+module Edible = {
+  let defaultWidth = 10.;
+  let defaultHeight = 10.;
+  let maximumVelocity = 0.1;
+
+  type t = {
+    position: (float, float),
+    velocity: (float, float),
+    width: float,
+    height: float,
   };
-  Draw.popMatrix(env);
-};
 
-let drawPipes = ({xOffset, pipes, image}, env) =>
-  List.iter(
-    ((x, y)) => {
-      let height = - int_of_float(pipeHeight);
-      Draw.subImage(
-        image,
-        ~pos=(int_of_float(x -. xOffset), int_of_float(y -. halfGap)),
-        ~width=int_of_float(pipeWidth),
-        ~height,
-        ~texPos=(0, 323),
-        ~texWidth=26,
-        ~texHeight=160,
-        env
-      );
-      Draw.subImage(
-        image,
-        ~pos=(int_of_float(x -. xOffset), int_of_float(y +. halfGap)),
-        ~width=int_of_float(pipeWidth),
-        ~height=int_of_float(pipeHeight),
-        ~texPos=(0, 323),
-        ~texWidth=26,
-        ~texHeight=160,
-        env
-      );
-    },
-    pipes
-  );
-
-let drawTiledThing =
-    ({image}, ~texPos, ~texWidth, ~texHeight, ~xOffset, ~y, ~height, env) => {
-  let width = Env.width(env);
-  Draw.subImage(
-    image,
-    ~pos=(int_of_float(-. xOffset) mod width, int_of_float(y)),
-    ~width,
-    ~height,
-    ~texPos,
-    ~texWidth,
-    ~texHeight,
-    env
-  );
-  Draw.subImage(
-    image,
-    ~pos=(int_of_float(-. xOffset) mod width + width, int_of_float(y)),
-    ~width,
-    ~height,
-    ~texPos,
-    ~texWidth,
-    ~texHeight,
-    env
-  );
-};
-
-let draw =
-    (
-      {font, score, image, birdY, birdVY, pipes, xOffset, running} as state,
-      env
-    ) => {
-  drawTiledThing(
-    state,
-    ~texPos=(146, 0),
-    ~texWidth=144,
-    ~texHeight=256,
-    ~xOffset=xOffset /. 2.,
-    ~y=0.,
-    ~height=Env.height(env),
-    env
-  );
-  drawPipes(state, env);
-  drawTiledThing(
-    state,
-    ~texPos=(292, 0),
-    ~texWidth=168,
-    ~texHeight=56,
-    ~xOffset,
-    ~y=floorY,
-    ~height=Env.height(env) - int_of_float(floorY),
-    env
-  );
-  drawBird(state, env);
-  Draw.pushMatrix(env);
-  Draw.translate(~x=170., ~y=90., env);
-  Draw.scale(~x=3., ~y=3., env);
-  Draw.text(~font, ~body=string_of_int(score), ~pos=(0, 0), env);
-  Draw.popMatrix(env);
-  if (running != Running) {
-    Draw.subImage(
-      image,
-      ~pos=(60, 200),
-      ~width=291,
-      ~height=63,
-      ~texPos=(395, 59),
-      ~texWidth=97,
-      ~texHeight=21,
-      env
-    );
+  let make = (area: (float, float)): t => {
+    position: createPosition(area),
+    velocity: createVelocity(maximumVelocity),
+    width: defaultWidth,
+    height: defaultHeight,
   };
-  let collided =
-    List.exists(
-      ((x, y)) =>
-        Utils.intersectRectCircle(
-          ~rectPos=(x -. xOffset, 0.),
-          ~rectW=pipeWidth,
-          ~rectH=y -. halfGap,
-          ~circlePos=(birdX, birdY),
-          ~circleRad=birdSize
-        )
-        || Utils.intersectRectCircle(
-             ~rectPos=(x -. xOffset, y +. halfGap),
-             ~rectW=pipeWidth,
-             ~rectH=float_of_int(Env.height(env)),
-             ~circlePos=(birdX, birdY),
-             ~circleRad=birdSize
-           ),
-      pipes
-    );
-  let pipes = generateNewPipes(state);
-  let hitFloor = birdY >= floorY -. birdSize;
-  let deltaTime = Env.deltaTime(env);
-  switch running {
-  | Running => {
-      ...state,
-      pipes,
-      birdY:
-        max(min(birdY +. birdVY *. deltaTime, floorY -. birdSize), birdSize),
-      birdVY:
-        Env.keyPressed(Space, env) || collided ?
-          jumpForce : birdVY +. gravity *. deltaTime,
-      xOffset: xOffset +. speed *. deltaTime,
-      running: collided || hitFloor ? Dead : Running,
-      score:
-        List.exists(
-          ((x, _)) =>
-            birdX +. xOffset <= x && birdX +. xOffset +. speed *. deltaTime > x,
-          pipes
-        ) ?
-          score + 1 : score
-    }
-  | Dead => {
-      ...state,
-      pipes,
-      birdY:
-        max(min(birdY +. birdVY *. deltaTime, floorY -. birdSize), birdSize),
-      birdVY: birdVY +. gravity *. deltaTime,
-      running: hitFloor ? Restart : Dead
-    }
-  | Restart =>
-    if (Env.keyPressed(Space, env)) {
-      {
-        ...state,
-        pipes: [
-          generatePipe(200.),
-          generatePipe(400.),
-          generatePipe(600.),
-          generatePipe(800.)
-        ],
-        birdY: defaultBirdY,
-        birdVY: 0.,
-        xOffset: 0.,
-        running: Running,
-        score: 0
-      };
+
+  let rec create = (area: (float, float), length: int): list(t) =>
+    if (length <= 0) {
+      [];
     } else {
-      state;
-    }
+      [make(area)] @ create(area, length - 1);
+    };
+
+  let update =
+      (edibles: list(t), (width, height) as display: (float, float), _env)
+      : list(t) => {
+    List.map(
+      ({position: (x, y), velocity: (xSpeed, ySpeed)} as edible) => {
+        let (x', y') = (x +. xSpeed, y +. ySpeed);
+        if (x' < 0. || width < x' || y' < 0. || height < y') {
+          List.hd(create(display, 1));
+        } else {
+          {...edible, position: (x', y'), velocity: (xSpeed, ySpeed)};
+        };
+      },
+      edibles,
+    );
+  };
+
+  let draw = (edibles: list(t), env) => {
+    List.iter(
+      ({position, width, height, velocity: (_xSpeed, _ySpeed)}) => {
+        Draw.stroke(Constants.green, env);
+        Draw.fill(Constants.white, env);
+        Draw.rectf(~pos=position, ~width, ~height, env);
+      },
+      edibles,
+    );
+  };
+};
+
+module Sandworm = {
+  let sandwormSpeed = 1.;
+  let maximumVelocity = 0.5;
+  let segmentSep = 7.;
+  let segmentRadius = 5.;
+
+  type stateT =
+    | Moving
+    | Eating
+    | Stopped;
+
+  type headT = {
+    state: stateT,
+    target: (float, float),
+    position: (float, float),
+    velocity: (float, float),
+  };
+
+  type bodyT = {position: (float, float)};
+
+  type t =
+    | Head(headT)
+    | Body(t, bodyT);
+
+  let rec makeBody = (parent: t, len: int): t =>
+    if (len > 0) {
+      let (x, y) =
+        switch (parent) {
+        | Head({position, _})
+        | Body(_, {position}) => position
+        };
+      makeBody(Body(parent, {position: (x -. segmentSep, y)}), len - 1);
+    } else {
+      parent;
+    };
+
+  let make = (display: (float, float), length: int): t => {
+    let position = createPosition(display);
+    makeBody(
+      Head({
+        state: Stopped,
+        target: position,
+        position,
+        velocity: createVelocity(maximumVelocity),
+      }),
+      length,
+    );
+  };
+
+  let rec draw = (sandworm: t, env) => {
+    let ((x, y), color) =
+      switch (sandworm) {
+      | Head({state, position, _}) =>
+        let color =
+          switch (state) {
+          | Moving => Constants.green
+          | Stopped => Constants.blue
+          | Eating => Constants.red
+          };
+
+        (position, color);
+      | Body(parent, {position, _}) =>
+        draw(parent, env);
+        (position, Constants.blue);
+      };
+    Draw.stroke(color, env);
+    Draw.fill(Constants.white, env);
+    Draw.ellipsef(
+      ~center=(x, y),
+      ~radx=segmentRadius,
+      ~rady=segmentRadius,
+      env,
+    );
+  };
+
+  let updateHead =
+      (
+        (xTarget, yTarget) as _target: (float, float),
+        (x, y) as _position: (float, float),
+        (xSpeed, ySpeed) as velocity: (float, float),
+        edibles: list(Edible.t),
+        display: (float, float),
+        env,
+      )
+      : (t, list(Edible.t)) => {
+    let (xMouse, yMouse) = Env.pmouse(env);
+    let (xTarget, yTarget) as target =
+      Env.mousePressed(env)
+        ? (float_of_int(xMouse), float_of_int(yMouse)) : (xTarget, yTarget);
+
+    let a' = xTarget -. x;
+    let b' = yTarget -. y;
+    let c' = sqrt(a' ** 2. +. b' ** 2.);
+
+    let c = sqrt(xSpeed ** 2. +. ySpeed ** 2.);
+
+    let r = c /. c';
+    let a = a' *. r;
+    let b = b' *. r;
+
+    let changedVelocity = (a, b);
+    let stopped =
+      abs_float(xTarget -. x) < 1. && abs_float(yTarget -. y) < 1.;
+    let position' = stopped ? (xTarget, yTarget) : (x +. a, y +. b);
+
+    if (stopped) {
+      let (eaten, edibles) =
+        List.partition(
+          (edible: Edible.t) =>
+            Utils.intersectRectCircle(
+              ~rectPos=edible.position,
+              ~rectW=edible.width,
+              ~rectH=edible.height,
+              ~circlePos=position',
+              ~circleRad=segmentRadius,
+            ),
+          edibles,
+        );
+      let no_eaten = List.length(eaten);
+      let eating = no_eaten > 0;
+      // if close to target don't stop
+      let state = eating ? Eating : Stopped;
+      //Js.log(no_eaten);
+      (
+        Head({state, target: position', position: position', velocity}),
+        edibles @ Edible.create(display, no_eaten),
+      );
+    } else {
+      (
+        Head({
+          state: Moving,
+          target,
+          position: position',
+          velocity: changedVelocity,
+        }),
+        edibles,
+      );
+    };
+  };
+
+  let updateBody = (parent: t, position): t => {
+    let (x, y) = position;
+
+    let (xTarget, yTarget) =
+      switch (parent) {
+      | Head({position: t, _})
+      | Body(_, {position: t}) => t
+      };
+
+    // find direction from position to target
+    let a' = xTarget -. x;
+    let b' = yTarget -. y;
+
+    // find distance to target
+    let c' = sqrt(a' ** 2. +. b' ** 2.);
+
+    let c = segmentSep;
+
+    let r = c /. c';
+    let a = a' *. r;
+    let b = b' *. r;
+
+    // find distance from parent in straight line to current position
+    let position' = (xTarget -. a, yTarget -. b);
+
+    Body(parent, {position: position'});
+  };
+
+  let rec update =
+          (
+            sandworm: t,
+            edibles: list(Edible.t),
+            display: (float, float),
+            env,
+          )
+          : (t, list(Edible.t)) => {
+    switch (sandworm) {
+    | Head({target, position, velocity}) =>
+      updateHead(target, position, velocity, edibles, display, env)
+    | Body(parent, {position: (x, y)}) =>
+      let (parent', edibles) = update(parent, edibles, display, env);
+      (updateBody(parent', (x, y)), edibles);
+    };
+  };
+};
+
+type globalStateT = {
+  display: (float, float),
+  edibles: list(Edible.t),
+  sandworm: Sandworm.t,
+  image: imageT,
+  font: fontT,
+  score: int,
+};
+
+let createEdible = Edible.create(display);
+
+let setup = env => {
+  let (width, height) = display;
+  Env.size(~width=int_of_float(width), ~height=int_of_float(height), env);
+  Draw.background(Constants.white, env);
+  {
+    display,
+    edibles: createEdible(10),
+    sandworm: Sandworm.make(display, 15),
+    image: Draw.loadImage(~filename="assets/flappy.png", ~isPixel=true, env),
+    font: Draw.loadFont(~filename="assets/flappy.fnt", ~isPixel=true, env),
+    score: 0,
+  };
+};
+
+let draw = ({edibles, sandworm, _} as state, env) => {
+  Draw.background(Constants.white, env);
+  Draw.clear(env);
+  Edible.draw(edibles, env);
+  Sandworm.draw(sandworm, env);
+
+  let (sandworm', edibles') =
+    Sandworm.update(sandworm, edibles, display, env);
+  {
+    ...state,
+    sandworm: sandworm',
+    edibles: Edible.update(edibles', display, env),
   };
 };
 
